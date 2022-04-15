@@ -1,3 +1,10 @@
+# -*- coding: utf-8 -*-
+"""
+This is a simplified way to locate duplicate files. It
+was originally written by Martin Schweitzer, of the
+Bureau of Meteorology in Australia.
+"""
+
 import os
 from os.path import join, getsize
 from collections import defaultdict
