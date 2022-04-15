@@ -1,8 +1,13 @@
-import os
-from os.path import join, getsize
-from collections import defaultdict
-import hashlib
-from functools import partial
+"""
+This is a simple program to find duplicate files.
+"""
+
+from    collections import defaultdict
+from    functools import partial
+import  hashlib
+import  os
+from    os.path import join, getsize
+import  sys
 
 def md5sum(filename):
     """Given a filename, return the MD5 hash """
