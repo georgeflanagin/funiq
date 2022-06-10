@@ -4,7 +4,7 @@
 __author__ =        'George Flanagin'
 __copyright__ =     'Copyright 2021 George Flanagin'
 __credits__ =       'None. This idea has been around forever.'
-__version__ =       '1.1'
+__version__ =       '2.0'
 __maintainer__ =    'George Flanagin'
 __email__ =         'me+redeux@georgeflanagin.com'
 __status__ =        'continual development.'
@@ -24,33 +24,18 @@ from   typing import *
 
 import argparse
 import collections
-import contextlib
-from   datetime import datetime
-import enum
-import fcntl
-from   functools import total_ordering
-import gc
-import hashlib
-import math
-import pwd
 import resource
-import shutil
 import time
 import textwrap
-from   urllib.parse import urlparse
 
 #####################################
 # From HPCLIB
 #####################################
 
-from   dorunrun import dorunrun, ExitCode
 import fileutils
 import fname
 import linuxutils
 from   linuxutils import dump_cmdline
-
-import sloppytree
-from   sloppytree import SloppyTree
 
 #####################################
 # Some Global data structures.      #
@@ -72,7 +57,6 @@ by_size     = collections.defaultdict(list)
 by_edge_hash = collections.defaultdict(list)
 by_hash     = collections.defaultdict(list)
 
-duplicates  = SloppyTree()
 hardlinks   = collections.defaultdict(list)
 
 redeux_help = """
@@ -141,6 +125,7 @@ def redeux_main(pargs:argparse.Namespace) -> int:
     # build a useless list in memory. 
     ############################################################
     sys.stderr.write(f"Looking at files in {pargs.dir}. Each dot is 1000 files.\n")
+    small_files = 0
     try:
         for i, f in enumerate(fileutils.all_files_in(pargs.dir, pargs.include_hidden), start=1):
             if not pargs.quiet and not i % 1000: 
@@ -153,51 +138,104 @@ def redeux_main(pargs:argparse.Namespace) -> int:
             # 2. Is it a symlink that we are not following?
             # 3. Is it qualified after stat-ing it?
             ######################################################
-
             if pargs.exclude and any(_ in f for _ in pargs.exclude): continue 
             if not pargs.follow_links and os.path.islink(f): continue
 
             f = fname.Fname(f)
-            by_inode[f._inode].append(str(f))
-            by_size[len(f)].append(str(f))
+            if len(f) < pargs.small_file: 
+                small_files += 1
+                continue
+            if f._nlink > 1: 
+                by_inode[f._inode].append(f)
+            else:
+                by_size[len(f)].append(f)
             
+        sys.stderr.write('\n')
+        sys.stderr.flush()
         tprint(f"All {i} files have been stat-ed")
 
     except KeyboardInterrupt as e:
         pass
 
 
-    tprint("Looking for pseudo-duplicates.")
-    hardlinks = {k:v for k,v in by_inode.items() if len(v) > 1}
-    tprint(f"There were {len(hardlinks)} pseudo-duplicates found.")
-    
-    tprint(f"Filtering size duplicates.")
+    tprint(f"{small_files} ignored due to small size")
+    tprint(f"There were {len(by_inode)} pseudo-duplicates found.")
+    tprint(f"Filtering files by size.")
+
+    ###
+    # by_size is a dict(int, list(fname)) If the len of the list(fname) is
+    #   only 1, then that file is unique.
+    ###
     size_dups = {k:v for k,v in by_size.items() if len(v) > 1}
     n_potential_duplicates = sum(len(v) for v in size_dups.values())
     tprint(f"{n_potential_duplicates} files to examine in {len(size_dups)} groups.")
+    tprint("Each # represents 1000 files hashed.")
 
-    # The next step is to remove any files that are the in the potential 
-    # duplicate list that are just links (have the same inode). Note that
-    # we don't care about modifying the hardlinks dict because we are
-    # removing these files from consideration, anyway.
-    for k, v in hardlinks.items():
-        firstfile = fname.Fname(v[0])
-        size_key = len(firstfile)
-        try:
-            same_size_files = size_dups[size_key]
-            remainder = list(set(same_size_files) - set(v))
-            if not len(remainder):
-                size_dups.pop(size_key)
-            else:
-                size_dups[size_key] = remainder
-            
-        except Exception as e:
-            tprint(f"Unknown exception {e}")
+    # No need to the look through the whole dict at once, the 
+    # potential duplicates are all associated with the same 
+    # size_dups key.
+    true_duplicates = collections.defaultdict()
+    edge_detections = 0
+    
+    ###
+    # size_dups is a dict(int, list(fname))
+    ###
+    hash_count = 0
+    for _, candidates in size_dups.items():
+        temp = collections.defaultdict(list)
 
-    n_potential_duplicates = sum(len(v) for v in size_dups.values())
-    tprint(f"{n_potential_duplicates} files left to examine in {len(size_dups)} groups.")
-            
+        # Let's build an table of the hashes of the edges of 
+        # the file to start. If the edges differ, we will not
+        # need to hash the whole file. Put the whole Fname obj
+        # as the value so that we can invoke the full hash
+        # if we need to in the next step.
+        for f in candidates:
+            temp[f._edge_hash].append(f)
+ 
+        ###
+        # temp is a dict(hash, list(fname))
+        ###
+        unique_hashes = {k for k in temp if len(temp[k]) == 1}
+        edge_detections += len(unique_hashes)
+
+        # Shrink temp a little, we hope. We are keeping the ones
+        # that had the same edge hash.
+
+        ###
+        # temp is a dict(hash, list(fname)) where the edge_hash was identical.
+        ###
+        temp = {k:v for k, v in temp.items() if k not in unique_hashes}
         
+        # Note that we don't care about the value of the edge_hash,
+        # and that means we can use a view of the values.
+        full_hashes = collections.defaultdict(list)
+        for v in temp.values():
+            for f in v:
+                hash_count += 1
+                if not hash_count % 1000: 
+                    sys.stderr.write('#')
+                    sys.stderr.flush()
+                full_hashes[f.hash].append(f)
+
+        ###
+        # full_hashes is a dict(hash, list(fname))
+        ###
+        unique_hashes = {k for k in full_hashes if len(full_hashes[k]) == 1}
+        duplicate_hashes = {k:v for k, v in full_hashes.items() if k not in unique_hashes}
+        for v in duplicate_hashes.values():
+            true_duplicates[len(v[0])] = v
+
+    num_dups = sum(len(v) for v in true_duplicates.values())
+    hogs = sorted(true_duplicates.keys(), reverse=True)
+    print("\n")
+    tprint(f"Eliminated {edge_detections} files with edge hashing.")
+    tprint(f"Found {num_dups} duplicated files representing {len(hogs)} unique files.")    
+
+    tprint(f"Writing results to {pargs.output}")
+    with open(pargs.output, 'w') as outfile:
+        for hog in hogs:
+            names = tuple(_.fqn for _ in true_duplicates[hog])
+            outfile.write(f"{hog}:{names}\n")
 
     # Now we need to hash the files that remain. Edges first.
     return os.EX_OK
@@ -255,8 +293,10 @@ K, M, G, or X (auto scale), instead""")
 
     pargs = parser.parse_args()
     if pargs.version:
-        print(f"Version 1.1")
+        print(f"Version {__version__}")
         sys.exit(os.EX_OK)
+    else:
+        pargs.version = __version__
 
     dump_cmdline(pargs, split_it=True)
     try:
