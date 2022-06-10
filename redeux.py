@@ -279,6 +279,8 @@ if __name__ == "__main__":
         default=resource.getpagesize()+1,
         help=f"files less than this size (default {resource.getpagesize()+1}) are not evaluated.")
 
+    parser.add_argument('--batch', action='store_true', help='no user prompts.')
+
     parser.add_argument('--units', type=str, 
         default="X", 
         choices=('B', 'G', 'K', 'M', 'X'),
@@ -300,8 +302,9 @@ K, M, G, or X (auto scale), instead""")
 
     dump_cmdline(pargs, split_it=True)
     try:
-        r = input("Does this look right to you? ")
-        if not "yes".startswith(r.lower()): sys.exit(os.EX_CONFIG)
+        if not pargs.batch:
+            r = input("Does this look right to you? ")
+            if not "yes".startswith(r.lower()): sys.exit(os.EX_CONFIG)
 
     except KeyboardInterrupt as e:
         print("Apparently it does not. Exiting.")
