@@ -69,14 +69,11 @@ by_size     = collections.defaultdict(list)
 ####
 # For files that are the same size, we check the hashes.
 ####
+by_edge_hash = collections.defaultdict(list)
 by_hash     = collections.defaultdict(list)
 
-####
-# The keys are the filenames, and the values are the info
-# about each file. Using SloppyTree instead of dict allows
-# us to directly instantiate the info about each file.
-####
-finfo_tree  = SloppyTree()
+duplicates  = SloppyTree()
+hardlinks   = collections.defaultdict(list)
 
 redeux_help = """
     Let's provide more info on a few of the key arguments and the
@@ -125,133 +122,16 @@ redeux_help = """
     
     """
 
-class StatName(enum.IntEnum):
-    """
-    Give these stats some clean names.
-    """
-    SIZE = 0
-    MODTIME = 1
-    ACCESSTIME = 2
-    INODE = 3
-    LINKCOUNT = 4
-    CREATETIME = 5
-
-
-def loglog(x:float) -> float:
-    return math.log(math.log(x))
-
-
-class AbstractSigmoid:
-    """
-    A tuneable scoring system for .. just about anything.
-    """
-
-    __slots__ = {
-        'max_value':'All calculations yield a value less than this.',
-        'incline'  :'Derivative at midpoint.',
-        'midpoint' :'x value at the midpoint.',
-        'rounding' :'number of digits to round.',
-        'scalefcn' :'function to scale the quantities.',
-        'now'      :'time when this object was created.'
-        }
-
-    call_keys = {'size', 'ctime', 'mtime', 'atime'}
-
-    __values__ = [ 1.0, 0.15, 40, 4, math.log, time.time()]
-    __defaults__ = dict(zip(__slots__, __values__))
-
-    def __init__(self, **kwargs) -> None:
-        for k, v in AbstractSigmoid.__defaults__.items():
-            setattr(self, k, v)
-        for k, v in kwargs.items():
-            try:
-                self[k] = v
-            except Exception as e:
-                raise Exception(f"Unknown parameter {k}")
-
-
-    def ugliness(self, path:str) -> float:
-        temp=os.stat(path)
-        return self(size=temp.st_size, mtime=temp.st_mtime, 
-            ctime=temp.st_ctime, atime=temp.st_atime)   
-
-
-    def __call__(self, **kwargs) -> float:
-        """
-        Invoke the sigmoid function to give us a number in the
-        range of [0, 1). Usage:
-
-        sigmoid = AbstractSigmoid()
-        v = sigmoid(...)
-        """
-        if not AbstractSigmoid.call_keys == set(kwargs):
-            return 0
-        unused = self.scalefcn(kwargs['atime'])
-        unmodded = self.scalefcn(kwargs['mtime'])
-        age = self.scalefcn(kwargs['ctime'])
-        size = self.scalefcn(kwargs['size'])
-        total = sum((age, size))
-
-        return round(self.max_value / 
-            (math.exp(-self.incline*(total-self.midpoint)) +1),
-            self.rounding)
-
-
-scorer = AbstractSigmoid()
-
-def stats_of_interest(f:str, pargs:argparse.Namespace) -> tuple:
-    """
-    Return a tuple of the "interesting" stats.
-    """
-    global start_time
-
-    try:
-        data = os.stat(f)
-    except PermissionError as e: 
-        # cannot stat it.
-        pargs.verbose and print(f"!perms! {f}")
-        return None
-
-    # Does it belong to root? 
-    if data.st_uid * data.st_gid == 0: 
-        pargs.verbose and print(f"!oroot! {f}")
-        return None 
-
-    # If it is tiny, why worry?
-    if data.st_size < pargs.small_file:     
-        pargs.verbose and print(f"!small! {f}")
-        return None
-
-    # If it is new, we must need it.
-    if start_time - data.st_ctime < pargs.young_file:
-        pargs.verbose and print(f"!young! {f}")
-        return None
-
-    # Size, mod time, access time, inode, number of links.
-    return ( data.st_size, data.st_mtime, data.st_atime, 
-            data.st_ino, data.st_nlink, data.st_ctime )
-
-
-def edgehash(filename:str) -> str:
-    hasher = hashlib.sha1()
-    with open(filename, 'rb') as f:
-        # hasher.update(f.read(4096))
-        f.seek(-4096, os.SEEK_END)
-        hasher.update(f.read())
-
-    return 'X' + hasher.hexdigest()[1:]
-
-
 def tprint(s:str) -> None:
     global start_time
 
     e = round(time.time() - start_time, 3)
-    print(f"{e} : {s}")
+    sys.stderr.write(f"{e} : {s}\n")
+    sys.stderr.flush()
 
 
 def redeux_main(pargs:argparse.Namespace) -> int:
 
-    global inode_to_filename, finfo_tree, dups_by_size, start_time
     outfile = open(pargs.output, 'w')
 
     pargs.exclude.extend(('/proc/', '/dev/', '/mnt/', '/sys/', '/boot/', '/var/'))
@@ -260,9 +140,9 @@ def redeux_main(pargs:argparse.Namespace) -> int:
     # Use the generator to collect the files so that we do not
     # build a useless list in memory. 
     ############################################################
-    sys.stderr.write(f"Looking at files in {pargs.dir}\n")
+    sys.stderr.write(f"Looking at files in {pargs.dir}. Each dot is 1000 files.\n")
     try:
-        for i, f in enumerate(fileutils.all_files_in(pargs.dir, pargs.include_hidden)):
+        for i, f in enumerate(fileutils.all_files_in(pargs.dir, pargs.include_hidden), start=1):
             if not pargs.quiet and not i % 1000: 
                 sys.stderr.write('.')
                 sys.stderr.flush()
@@ -276,60 +156,50 @@ def redeux_main(pargs:argparse.Namespace) -> int:
 
             if pargs.exclude and any(_ in f for _ in pargs.exclude): continue 
             if not pargs.follow_links and os.path.islink(f): continue
-            if (finfo := stats_of_interest(f, pargs)) is None: continue           
 
-            ######################################################
-            # Load it in the data structures.
-            ######################################################
-            finfo_tree[f].size = finfo[StatName.SIZE]
-            finfo_tree[f].inode = finfo[StatName.INODE]
-            by_size[finfo[StatName.SIZE]].append(f)
-            if finfo[StatName.LINKCOUNT] > 1: by_inode[finfo[StatName.INODE]].append(f)
+            f = fname.Fname(f)
+            by_inode[f._inode].append(str(f))
+            by_size[len(f)].append(str(f))
+            
+        tprint(f"All {i} files have been stat-ed")
 
     except KeyboardInterrupt as e:
         pass
 
-    sys.stderr.write(f"\n{i+1} files were discovered.\n")
-    sys.stderr.write(f"{len(by_inode.keys())} hard links.\n")
-    sys.stderr.write(f"{len(finfo_tree.keys())} files to be further considered.\n")
 
-    size_dups = {size:filelist for size, filelist in by_size.items() if len(filelist) > 1}
-    sys.stderr.write(f"{len(size_dups)} potential groups to consider. Hashing ...\n")
+    tprint("Looking for pseudo-duplicates.")
+    hardlinks = {k:v for k,v in by_inode.items() if len(v) > 1}
+    tprint(f"There were {len(hardlinks)} pseudo-duplicates found.")
+    
+    tprint(f"Filtering size duplicates.")
+    size_dups = {k:v for k,v in by_size.items() if len(v) > 1}
+    n_potential_duplicates = sum(len(v) for v in size_dups.values())
+    tprint(f"{n_potential_duplicates} files to examine in {len(size_dups)} groups.")
 
-    try:
-        for i, datum in enumerate(size_dups.items()):
-            if i % 100 == 0: 
-                sys.stderr.write('+')
-                sys.stderr.flush()
+    # The next step is to remove any files that are the in the potential 
+    # duplicate list that are just links (have the same inode). Note that
+    # we don't care about modifying the hardlinks dict because we are
+    # removing these files from consideration, anyway.
+    for k, v in hardlinks.items():
+        firstfile = fname.Fname(v[0])
+        size_key = len(firstfile)
+        try:
+            same_size_files = size_dups[size_key]
+            remainder = list(set(same_size_files) - set(v))
+            if not len(remainder):
+                size_dups.pop(size_key)
+            else:
+                size_dups[size_key] = remainder
+            
+        except Exception as e:
+            tprint(f"Unknown exception {e}")
 
-            size, filelist = datum
-            for f in filelist:
-                if finfo_tree[f].inode in by_inode: continue
-                f = fname.Fname(f)
-                if size > pargs.big_file: 
-                    by_hash[edgehash(str(f))].append(str(f))
-                else:        
-                    by_hash[f.hash].append(str(f))
-
-    except KeyboardInterrupt as e:
-        pass
-
-    true_duplicates = {hash:filelist for hash, filelist in by_hash.items() if len(filelist) > 1}
-    print(f"\n{len(true_duplicates)} true duplicates found. Writing list to {pargs.output}\n")
-
-    d = {}
-    for hash, filelist in true_duplicates.items():
-        # We know the size is the same for all elements of the list, so
-        # we can just take the first size.
-        if hash.startswith('X'):
-            d[os.stat(filelist[0]).st_size] = tuple(('X', *filelist))
-        else:
-            d[os.stat(filelist[0]).st_size] = tuple(filelist)
-
-    with open(pargs.output, 'w') as outfile:
-        for k in sorted(d, reverse=True):
-            outfile.write(f"{k} : {d[k]}\n")
+    n_potential_duplicates = sum(len(v) for v in size_dups.values())
+    tprint(f"{n_potential_duplicates} files left to examine in {len(size_dups)} groups.")
+            
         
+
+    # Now we need to hash the files that remain. Edges first.
     return os.EX_OK
 
 
@@ -341,15 +211,9 @@ if __name__ == "__main__":
 
     parser.add_argument('-?', '--explain', action='store_true')
 
-    parser.add_argument('--big-file', type=int, 
-        default=1<<20,
-        help="""A file larger than this value is *big* enough it has a 
-high probability of being a dup of a file the same size,
-so we just assume it is a duplicate.""")
-
     parser.add_argument('--dir', type=str, 
-        default=fileutils.expandall("$HOME"),
-        help="directory to investigate (if not your home dir)")
+        default=fileutils.expandall(os.getcwd()),
+        help="directory to investigate (if not *this* directory)")
 
     parser.add_argument('-x', '--exclude', action='append', 
         default=[],
@@ -360,9 +224,6 @@ so we just assume it is a duplicate.""")
 
     parser.add_argument('--include-hidden', action='store_true',
         help="search hidden directories as well.")
-
-    parser.add_argument('--just-do-it', action='store_true',
-        help="run the program using the defaults.")
 
     parser.add_argument('--limit', type=int, default=sys.maxsize,
         help="Limit the number of files considered for testing purposes.")
@@ -392,23 +253,19 @@ K, M, G, or X (auto scale), instead""")
     parser.add_argument('--version', action='store_true', 
         help='Print the version and exit.')
 
-    parser.add_argument('--young-file', type=int, default=0,
-        help="default is 0 days -- i.e., consider all files, even new ones.")
-
     pargs = parser.parse_args()
     if pargs.version:
         print(f"Version 1.1")
         sys.exit(os.EX_OK)
 
     dump_cmdline(pargs, split_it=True)
-    if not pargs.just_do_it: 
-        try:
-            r = input("Does this look right to you? ")
-            if not "yes".startswith(r.lower()): sys.exit(os.EX_CONFIG)
+    try:
+        r = input("Does this look right to you? ")
+        if not "yes".startswith(r.lower()): sys.exit(os.EX_CONFIG)
 
-        except KeyboardInterrupt as e:
-            print("Apparently it does not. Exiting.")
-            sys.exit(os.EX_CONFIG)
+    except KeyboardInterrupt as e:
+        print("Apparently it does not. Exiting.")
+        sys.exit(os.EX_CONFIG)
 
     start_time = time.time()
     os.nice(pargs.nice)
