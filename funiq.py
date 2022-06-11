@@ -114,7 +114,7 @@ def tprint(s:str) -> None:
     sys.stderr.flush()
 
 
-def redeux_main(pargs:argparse.Namespace) -> int:
+def funiq_main(pargs:argparse.Namespace) -> int:
 
     outfile = open(pargs.output, 'w')
 
@@ -245,7 +245,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog='redeux',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=textwrap.dedent(redeux_help),
-        description='redeux: Find probable duplicate files.')
+        description='funiq: Find probable duplicate files.')
 
     parser.add_argument('-?', '--explain', action='store_true')
 
@@ -312,4 +312,4 @@ K, M, G, or X (auto scale), instead""")
 
     start_time = time.time()
     os.nice(pargs.nice)
-    sys.exit(redeux_main(pargs))
+    sys.exit(funiq_main(pargs))
