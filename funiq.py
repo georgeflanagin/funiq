@@ -28,9 +28,10 @@ import resource
 import time
 import textwrap
 
-#####################################
-# From HPCLIB
-#####################################
+###
+# Installed libraries.
+###
+import pandas
 
 import fileutils
 import fname
@@ -272,9 +273,17 @@ def funiq_main(pargs:argparse.Namespace) -> int:
     tprint(f"Found {num_dups} duplicated files representing {len(hogs)} unique files.")    
 
     tprint(f"Writing results to {pargs.output}")
+    df = pandas.DataFrame(columns=['hogsize', 'hogname'])
+
+    # The for-loop will be empty if there are no hogs, so no need to
+    # purposefully ignore this statement.
+    for hog in hogs:
+        rows = pandas.DataFrame(((hog, name) 
+            for name in (_.fqn for _ in true_duplicates[hog])))
+        df = pandas.concat([df, rows], axis='columns')
+    
+    
     with open(pargs.output, 'w') as outfile:
-        for hog in hogs:
-            names = tuple(_.fqn for _ in true_duplicates[hog])
             outfile.write(f"{hog}:{names}\n")
 
     # Now we need to hash the files that remain. Edges first.
@@ -289,6 +298,11 @@ if __name__ == "__main__":
 
     parser.add_argument('-?', '--explain', action='store_true')
 
+    parser.add_argument('--batch', action='store_true', help='no user prompts.')
+
+    parser.add_argument('--defcon', type=int, choices=(5, 4, 3, 2, 1),
+        default=5, help="The defcon level. For more info, use help.")
+
     parser.add_argument('--dir', type=str, 
         default=fileutils.expandall(os.getcwd()),
         help="directory to investigate (if not *this* directory)")
@@ -300,6 +314,10 @@ if __name__ == "__main__":
     parser.add_argument('--follow-links', action='store_true',
         help="follow symbolic links -- the default is not to.")
 
+    parser.add_argument('-f', '--format', type=str, default='csv',
+        choices=('csv', 'pandas', 'pickle', 'stata', 'feather'),
+        help="Format for the report on activities.")
+
     parser.add_argument('--include-hidden', action='store_true',
         help="search hidden directories as well.")
 
@@ -310,7 +328,7 @@ if __name__ == "__main__":
         help="by default, this program runs /very/ nicely at nice=20")
 
     parser.add_argument('-o', '--output', type=str, default="duplicatefiles.csv",
-        help="Output file with the duplicates named")
+        help="Output file with the duplicates files' names. Default is <duplicatefiles.csv>")
 
     parser.add_argument('--quiet', action='store_true',
         help="eliminates narrative while running except for errors.")
@@ -318,8 +336,6 @@ if __name__ == "__main__":
     parser.add_argument('--small-file', type=int, 
         default=resource.getpagesize()+1,
         help=f"files less than this size (default {resource.getpagesize()+1}) are not evaluated.")
-
-    parser.add_argument('--batch', action='store_true', help='no user prompts.')
 
     parser.add_argument('--units', type=str, 
         default="X", 
@@ -332,6 +348,11 @@ K, M, G, or X (auto scale), instead""")
 
     parser.add_argument('--version', action='store_true', 
         help='Print the version and exit.')
+
+    parser.add_argument('--young-file', type=int, default=0, 
+        help="If a file is younger than this value in days, "\
+            "it is ignored for the purpose of determining duplicates. "\
+            "The default is to consider all files.")
 
     pargs = parser.parse_args()
     if pargs.version:
@@ -346,7 +367,7 @@ K, M, G, or X (auto scale), instead""")
             r = input("Does this look right to you? ")
             if not "yes".startswith(r.lower()): sys.exit(os.EX_CONFIG)
 
-    except KeyboardInterrupt as e:
+    except (KeyboardInterrupt, EOFError) as e:
         print("Apparently it does not. Exiting.")
         sys.exit(os.EX_CONFIG)
 
