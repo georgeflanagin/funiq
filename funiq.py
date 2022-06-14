@@ -345,7 +345,6 @@ def funiq_main(pargs:argparse.Namespace) -> int:
         outfile_name.fqn )
     
     result = getattr(df, foo)(text, index=False)
-    print(f"{result=}")
         
     # Now we need to hash the files that remain. Edges first.
     return os.EX_OK
