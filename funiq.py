@@ -37,6 +37,8 @@ import fileutils
 import fname
 import linuxutils
 from   linuxutils import dump_cmdline
+from   sloppytree import SloppyTree
+from   urdecorators import trap
 
 #####################################
 # Some Global data structures.      #
@@ -59,6 +61,15 @@ by_edge_hash = collections.defaultdict(list)
 by_hash     = collections.defaultdict(list)
 
 hardlinks   = collections.defaultdict(list)
+
+converters = {
+    'stata':('to_stata', 'dta'),
+    'excel':('to_excel','xls'),
+    'json':('to_json','json'),
+    'csv':('to_csv', 'csv'),
+    'feather': ('to_feather','feather'),
+    'pickle':('to_pickle', 'pickle')
+    }
 
 funiq_help = """
     Let's provide more info on a few of the key arguments and the
@@ -155,9 +166,8 @@ def tprint(s:str) -> None:
     sys.stderr.flush()
 
 
+@trap
 def funiq_main(pargs:argparse.Namespace) -> int:
-
-    outfile = open(pargs.output, 'w')
 
     pargs.exclude.extend(('/proc/', '/dev/', '/mnt/', '/sys/', '/boot/', '/var/'))
 
@@ -165,8 +175,9 @@ def funiq_main(pargs:argparse.Namespace) -> int:
     # Use the generator to collect the files so that we do not
     # build a useless list in memory. 
     ############################################################
-    sys.stderr.write(f"Looking at files in {pargs.dir}. Each dot is 1000 files.\n")
+    tprint(f"Stating directory entries in {pargs.dir}. Each dot represents 1000 files.\n")
     small_files = 0
+    young_files = 0
     try:
         for i, f in enumerate(fileutils.all_files_in(pargs.dir, pargs.include_hidden), start=1):
             if not pargs.quiet and not i % 1000: 
@@ -186,10 +197,16 @@ def funiq_main(pargs:argparse.Namespace) -> int:
             if len(f) < pargs.small_file: 
                 small_files += 1
                 continue
+
+            if pargs.young_file and f.age < pargs.young_file:
+                young_files += 1
+                continue
+
             if f._nlink > 1: 
                 by_inode[f._inode].append(f)
             else:
                 by_size[len(f)].append(f)
+            
             
         sys.stderr.write('\n')
         sys.stderr.flush()
@@ -199,9 +216,10 @@ def funiq_main(pargs:argparse.Namespace) -> int:
         pass
 
 
-    tprint(f"{small_files} ignored due to small size")
+    tprint(f"{small_files} not considered due to small size.")
+    tprint(f"{young_files} not considered due to recent activity.")
     tprint(f"There were {len(by_inode)} pseudo-duplicates found.")
-    tprint(f"Filtering files by size.")
+    tprint(f"Filtering {len(by_size)} file sizes.")
 
     ###
     # by_size is a dict(int, list(fname)) If the len of the list(fname) is
@@ -209,8 +227,9 @@ def funiq_main(pargs:argparse.Namespace) -> int:
     ###
     size_dups = {k:v for k,v in by_size.items() if len(v) > 1}
     n_potential_duplicates = sum(len(v) for v in size_dups.values())
-    tprint(f"{n_potential_duplicates} files to examine in {len(size_dups)} groups.")
-    tprint("Each # represents 1000 files hashed.")
+    blocks = 64 if pargs.defcon == 4 else 1
+    tprint(f"{n_potential_duplicates} files to examine in {len(size_dups)} size groups.")
+    tprint(f"Hashing {blocks} blocks of each file. Each # represents 1000 files hashed.")
 
     # No need to the look through the whole dict at once, the 
     # potential duplicates are all associated with the same 
@@ -223,6 +242,10 @@ def funiq_main(pargs:argparse.Namespace) -> int:
     ###
     hash_count = 0
     for _, candidates in size_dups.items():
+        hash_count += 1
+        if not hash_count % 1000: 
+            sys.stderr.write('#')
+            sys.stderr.flush()
         temp = collections.defaultdict(list)
 
         # Let's build an table of the hashes of the edges of 
@@ -231,7 +254,7 @@ def funiq_main(pargs:argparse.Namespace) -> int:
         # as the value so that we can invoke the full hash
         # if we need to in the next step.
         for f in candidates:
-            temp[f._edge_hash].append(f)
+            temp[f.edge_hash(blocks)].append(f)
  
         ###
         # temp is a dict(hash, list(fname))
@@ -247,16 +270,15 @@ def funiq_main(pargs:argparse.Namespace) -> int:
         ###
         temp = {k:v for k, v in temp.items() if k not in unique_hashes}
         
-        # Note that we don't care about the value of the edge_hash,
-        # and that means we can use a view of the values.
-        full_hashes = collections.defaultdict(list)
-        for v in temp.values():
-            for f in v:
-                hash_count += 1
-                if not hash_count % 1000: 
-                    sys.stderr.write('#')
-                    sys.stderr.flush()
-                full_hashes[f.hash].append(f)
+        if pargs.defcon < 4:
+            # Note that we don't care about the value of the edge_hash,
+            # and that means we can use a view of the values.
+            full_hashes = collections.defaultdict(list)
+            for v in temp.values():
+                for f in v:
+                    full_hashes[f.hash].append(f)
+        else:
+            full_hashes = temp
 
         ###
         # full_hashes is a dict(hash, list(fname))
@@ -270,22 +292,30 @@ def funiq_main(pargs:argparse.Namespace) -> int:
     hogs = sorted(true_duplicates.keys(), reverse=True)
     print("\n")
     tprint(f"Eliminated {edge_detections} files with edge hashing.")
-    tprint(f"Found {num_dups} duplicated files representing {len(hogs)} unique files.")    
+    tprint(f"Found {num_dups} (probable) duplicated files representing {len(hogs)} unique files.")    
 
     tprint(f"Writing results to {pargs.output}")
     df = pandas.DataFrame(columns=['hogsize', 'hogname'])
 
     # The for-loop will be empty if there are no hogs, so no need to
     # purposefully ignore this statement.
-    for hog in hogs:
-        rows = pandas.DataFrame(((hog, name) 
-            for name in (_.fqn for _ in true_duplicates[hog])))
-        df = pandas.concat([df, rows], axis='columns')
-    
-    
-    with open(pargs.output, 'w') as outfile:
-            outfile.write(f"{hog}:{names}\n")
+    true_duplicates = dict(sorted(true_duplicates.items(), reverse=True))
+    row_generator = ((hogsize, f) 
+        for hogsize, files in true_duplicates.items() 
+            for f in files)
 
+    df = pandas.DataFrame(row_generator,
+        columns=('hogsize', 'hogname'))
+    
+    foo, ext = converters[pargs.format]
+    outfile_name = fname.Fname(pargs.output)
+    text = ( f"{str(outfile_name)}.{ext}" 
+        if outfile_name.fqn == outfile_name.all_but_ext else
+        outfile_name.fqn )
+    
+    result = getattr(df, foo)(text, index=False)
+    print(f"{result=}")
+        
     # Now we need to hash the files that remain. Edges first.
     return os.EX_OK
 
@@ -315,7 +345,7 @@ if __name__ == "__main__":
         help="follow symbolic links -- the default is not to.")
 
     parser.add_argument('-f', '--format', type=str, default='csv',
-        choices=('csv', 'pandas', 'pickle', 'stata', 'feather'),
+        choices=('csv', 'pandas', 'pickle', 'stata', 'feather', 'json', 'excel'),
         help="Format for the report on activities.")
 
     parser.add_argument('--include-hidden', action='store_true',
