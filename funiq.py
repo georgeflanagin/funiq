@@ -162,7 +162,7 @@ def all_files_in(s:str, include_hidden:bool=False) -> str:
     for c, d, files in os.walk(s):
         for f in files:
             s = os.path.join(c, f)
-            if not include_hidden and is_hidden(s): continue
+            if not include_hidden and '/.' in s: continue
             yield s
 
 
@@ -272,10 +272,6 @@ def funiq_main(pargs:argparse.Namespace) -> int:
     ###
     hash_count = 0
     for _, candidates in size_dups.items():
-        hash_count += 1
-        if not hash_count % 1000: 
-            sys.stderr.write('#')
-            sys.stderr.flush()
         temp = collections.defaultdict(list)
 
         # Let's build an table of the hashes of the edges of 
@@ -284,6 +280,11 @@ def funiq_main(pargs:argparse.Namespace) -> int:
         # as the value so that we can invoke the full hash
         # if we need to in the next step.
         for f in candidates:
+            hash_count += 1
+            if not hash_count % 1000: 
+                sys.stderr.write('#')
+                sys.stderr.flush()
+            pargs.verbose and print(f)
             temp[f.edge_hash(blocks)].append(f)
  
         ###
