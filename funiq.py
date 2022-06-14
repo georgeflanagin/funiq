@@ -33,12 +33,7 @@ import textwrap
 ###
 import pandas
 
-import fileutils
 import fname
-import linuxutils
-from   linuxutils import dump_cmdline
-from   sloppytree import SloppyTree
-from   urdecorators import trap
 
 #####################################
 # Some Global data structures.      #
@@ -158,6 +153,42 @@ funiq_help = """
     
     """
 
+def all_files_in(s:str, include_hidden:bool=False) -> str:
+    """
+    A generator to cough up the full file names for every
+    file in a directory.
+    """
+    s = expandall(s)
+    for c, d, files in os.walk(s):
+        for f in files:
+            s = os.path.join(c, f)
+            if not include_hidden and is_hidden(s): continue
+            yield s
+
+
+def dump_cmdline(args:argparse.ArgumentParser, return_it:bool=False, split_it:bool=False) -> str:
+    """
+    Print the command line arguments as they would have been if the user
+    had specified every possible one (including optionals and defaults).
+    """
+    if not return_it: print("")
+    opt_string = ""
+    sep='\n' if split_it else ' '
+    for _ in sorted(vars(args).items()):
+        opt_string += f"{sep}--"+ _[0].replace("_","-") + " " + str(_[1])
+    if not return_it: print(opt_string + "\n")
+    
+    return opt_string if return_it else ""
+
+
+def expandall(s:str) -> str:
+    """
+    Expand all the user vars into an absolute path name. If the 
+    argument happens to be None, it is OK.
+    """
+    return s if s is None else os.path.abspath(os.path.expandvars(os.path.expanduser(s)))
+    
+
 def tprint(s:str) -> None:
     global start_time
 
@@ -166,7 +197,6 @@ def tprint(s:str) -> None:
     sys.stderr.flush()
 
 
-@trap
 def funiq_main(pargs:argparse.Namespace) -> int:
 
     pargs.exclude.extend(('/proc/', '/dev/', '/mnt/', '/sys/', '/boot/', '/var/'))
@@ -179,7 +209,7 @@ def funiq_main(pargs:argparse.Namespace) -> int:
     small_files = 0
     young_files = 0
     try:
-        for i, f in enumerate(fileutils.all_files_in(pargs.dir, pargs.include_hidden), start=1):
+        for i, f in enumerate(all_files_in(pargs.dir, pargs.include_hidden), start=1):
             if not pargs.quiet and not i % 1000: 
                 sys.stderr.write('.')
                 sys.stderr.flush()
@@ -334,7 +364,7 @@ if __name__ == "__main__":
         default=5, help="The defcon level. For more info, use help.")
 
     parser.add_argument('--dir', type=str, 
-        default=fileutils.expandall(os.getcwd()),
+        default=expandall(os.getcwd()),
         help="directory to investigate (if not *this* directory)")
 
     parser.add_argument('-x', '--exclude', action='append', 
