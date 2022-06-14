@@ -153,6 +153,8 @@ funiq_help = """
     
     """
 
+quiet = False
+
 def all_files_in(s:str, include_hidden:bool=False) -> str:
     """
     A generator to cough up the full file names for every
@@ -191,6 +193,8 @@ def expandall(s:str) -> str:
 
 def tprint(s:str) -> None:
     global start_time
+    global quiet
+    if quiet: return
 
     e = round(time.time() - start_time, 3)
     sys.stderr.write(f"{e} : {s}\n")
@@ -284,7 +288,7 @@ def funiq_main(pargs:argparse.Namespace) -> int:
             if not hash_count % 1000: 
                 sys.stderr.write('#')
                 sys.stderr.flush()
-            pargs.verbose and print(f)
+            not pargs.quiet and pargs.verbose and print(f)
             temp[f.edge_hash(blocks)].append(f)
  
         ###
@@ -422,6 +426,7 @@ K, M, G, or X (auto scale), instead""")
         pargs.version = __version__
 
     dump_cmdline(pargs, split_it=True)
+    quiet = pargs.quiet
     try:
         if not pargs.batch:
             r = input("Does this look right to you? ")
