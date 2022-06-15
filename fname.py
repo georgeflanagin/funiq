@@ -75,7 +75,7 @@ class Fname:
         '_content_hash' : 'hexdigit string representing the hash of the contents at last reading', # 11
         '_edge_hash' : 'hash of the first and last disc page of the file.', # 12 
         '_lock_handle' : 'an entry in the logical unit table.', # 13
-        '_age' : 'Approximate age of the file in days.' # 14
+        '_DoB' : 'Approximate age of the file in days.' # 14
         }
 
     __values__ = ( None, False, '', '', '', '', '', '', -1, 0, None, '', '', None, 0.0 )
@@ -115,7 +115,7 @@ class Fname:
             self._inode = result.st_ino
             self._len = result.st_size
             self._nlink = result.st_nlink
-            self._age = (time.time() - result.st_mtime) / 86400 
+            self._DoB = result.st_mtime
         except Exception as e:
             pass
 
@@ -239,12 +239,12 @@ class Fname:
 
 
     @property
-    def age(self) -> float:
+    def DoB(self) -> float:
         """
         Returns the age of the file construed to be the number
         of days elapsed since the most recent modification. 
         """
-        return self._age
+        return self._DoB
 
 
     @property

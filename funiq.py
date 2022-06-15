@@ -24,6 +24,7 @@ from   typing import *
 
 import argparse
 import collections
+import datetime
 import resource
 import time
 import textwrap
@@ -34,6 +35,7 @@ import textwrap
 import pandas
 
 import fname
+from   urdecorators import trap
 
 #####################################
 # Some Global data structures.      #
@@ -201,6 +203,7 @@ def tprint(s:str) -> None:
     sys.stderr.flush()
 
 
+@trap
 def funiq_main(pargs:argparse.Namespace) -> int:
 
     pargs.exclude.extend(('/proc/', '/dev/', '/mnt/', '/sys/', '/boot/', '/var/'))
@@ -212,6 +215,7 @@ def funiq_main(pargs:argparse.Namespace) -> int:
     tprint(f"Stating directory entries in {pargs.dir}. Each dot represents 1000 files.\n")
     small_files = 0
     young_files = 0
+    youngest_file = time.time() - pargs.young_file*86400
     try:
         for i, f in enumerate(all_files_in(pargs.dir, pargs.include_hidden), start=1):
             if not pargs.quiet and not i % 1000: 
@@ -232,7 +236,7 @@ def funiq_main(pargs:argparse.Namespace) -> int:
                 small_files += 1
                 continue
 
-            if pargs.young_file and f.age < pargs.young_file:
+            if pargs.young_file and f.DoB > youngest_file:
                 young_files += 1
                 continue
 
@@ -334,12 +338,12 @@ def funiq_main(pargs:argparse.Namespace) -> int:
     # The for-loop will be empty if there are no hogs, so no need to
     # purposefully ignore this statement.
     true_duplicates = dict(sorted(true_duplicates.items(), reverse=True))
-    row_generator = ((hogsize, f) 
+    row_generator = ((hogsize, f, datetime.date.fromtimestamp(int(f.DoB))) 
         for hogsize, files in true_duplicates.items() 
             for f in files)
 
     df = pandas.DataFrame(row_generator,
-        columns=('hogsize', 'hogname'))
+        columns=('hogsize', 'hogname', 'date'))
     
     foo, ext = converters[pargs.format]
     outfile_name = fname.Fname(pargs.output)
