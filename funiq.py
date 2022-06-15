@@ -330,7 +330,6 @@ def funiq_main(pargs:argparse.Namespace) -> int:
     tprint(f"Found {num_dups} (probable) duplicated files representing {len(hogs)} unique files.")    
 
     tprint(f"Writing results to {pargs.output}")
-    df = pandas.DataFrame(columns=['hogsize', 'hogname'])
 
     # The for-loop will be empty if there are no hogs, so no need to
     # purposefully ignore this statement.
