@@ -60,31 +60,6 @@ by_hash     = collections.defaultdict(list)
 hardlinks   = collections.defaultdict(list)
 
 
-byte_symbols = tuple(list('YZEPTGMB'))
-byte_values = tuple((2<<10)**i for i in range(8,0,-1))
-byte_sizes = dict(zip(byte_symbols, byte_values))
-
-
-def byte_scale(i:int, key:str='X') -> str:
-    """
-    i -- an integer to scale.
-    key -- a character to use for scaling.
-    """
-    try:
-        divisor = byte_scaling[key]
-    except:
-        return ""
-
-    try:
-        return f"{round(i/divisor, 3)}{key}"
-    except:
-        for k, v in byte_scaling.items():
-            if i > v: return f"{round(i/v, 3)}{k}"
-        else:
-            # How did this happen?
-            return f"Error: byte_scale({i}, {k})"
-
-
 converters = {
     'stata':('to_stata', 'dta'),
     'excel':('to_excel','xls'),
@@ -196,37 +171,17 @@ def all_files_in(s:str, include_hidden:bool=False) -> str:
             yield s
 
 
-byte_remap = {
-    'YB':'Y',
-    'ZB':'Z',
-    'EB':'E',
-    'PB':'P',
-    'TB':'T',
-    'GB':'G',
-    'MB':'M',
-    'KB':'K'
-    }
-
-
-byte_scaling = {
-    'Y':1024**8,
-    'Z':1024**7,
-    'E':1024**6,
-    'P':1024**5,
-    'T':1024**4,
-    'G':1024**3,
-    'M':1024**2,
-    'K':1024**1,
-    'B':1024**0,
-    'X':None
-    }
-
+byte_symbols = tuple(list('YZEPTGMB'))
+byte_values = tuple((2<<10)**i for i in range(8,0,-1))
+byte_scaling = dict(zip(byte_symbols, byte_values))
 
 def byte_scale(i:int, key:str='X') -> str:
     """
     i -- an integer to scale.
     key -- a character to use for scaling.
     """
+    global byte_scaling
+
     try:
         if (divisor := byte_scaling[key]) == 1: return i
     except:
@@ -240,25 +195,6 @@ def byte_scale(i:int, key:str='X') -> str:
         else:
             # How did this happen?
             return f"Error: byte_scale({i}, {k})"
-
-
-def byte_size(s:str) -> int:
-    """
-    Takes a string like '20K' and changes it to 20*1024.
-    Note that it accepts '20k' or '20K'
-    """ 
-    if not s: return 0
-
-    # Take care of the case where it is KB rather than K, etc.
-    if s[-2:] in byte_remap:
-        s = s[:-2] + byte_remap[s[-2:]]
-
-    try:
-        multiplier = byte_scaling[s[-1].upper()]
-        the_rest = int(s[:-1])
-        return the_rest*multiplier
-    except:
-        return 0
 
 
 def dump_cmdline(args:argparse.ArgumentParser, return_it:bool=False, split_it:bool=False) -> str:
