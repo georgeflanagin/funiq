@@ -6,7 +6,7 @@ __copyright__ =     'Copyright 2021 George Flanagin'
 __credits__ =       'None. This idea has been around forever.'
 __version__ =       '2.0'
 __maintainer__ =    'George Flanagin'
-__email__ =         'me+redeux@georgeflanagin.com'
+__email__ =         'me+funiq@georgeflanagin.com'
 __status__ =        'continual development.'
 __license__ =       'MIT'
 
@@ -30,12 +30,32 @@ import time
 import textwrap
 
 ###
-# Installed libraries.
+# Installed libraries for our data formats.
 ###
-import pandas
+converters = {
+    'stata':('to_stata', 'dta'),
+    'excel':('to_excel','xls'),
+    'json':('to_json','json'),
+    'csv':('to_csv', 'csv'),
+    'feather': ('to_feather','feather'),
+    'pickle':('to_pickle', 'pickle')
+    }
+
+# If the Apache feather system is not installed, we will
+# simply forgive it and move on.
+try:
+    import pyarrow
+except ImportError as e:
+    converters.pop('feather')
+
+# But pandas are essential.
+try:
+    import pandas
+except ImportError as e:
+    sys.stderr.write("You must install pandas to run this program.\n")
+    sys.exit(os.EX_SOFTWARE)
 
 import fname
-from   urdecorators import trap
 
 #####################################
 # Some Global data structures.      #
@@ -60,18 +80,11 @@ by_hash     = collections.defaultdict(list)
 hardlinks   = collections.defaultdict(list)
 
 
-converters = {
-    'stata':('to_stata', 'dta'),
-    'excel':('to_excel','xls'),
-    'json':('to_json','json'),
-    'csv':('to_csv', 'csv'),
-    'feather': ('to_feather','feather'),
-    'pickle':('to_pickle', 'pickle')
-    }
-
 funiq_help = """
-    Let's provide more info on a few of the key arguments and the
-        display while the program runs.
+    For the most up to date help, see:
+
+        https://github.com/georgeflanagin/funiq/blob/v2/README.md
+
 
     Unless you are running --quiet, the program will display
         a period for every 1000 files that are "stat-ed" when the
@@ -105,7 +118,7 @@ funiq_help = """
         "--exclude /private", then any file in any directory that
         begins with "private" will be excluded.
 
-        Given that one may want to run this program as root, redeux
+        Given that one may want to run this program as root, funiq 
         will always ignore files that are owned by root, as well as
         files in the top level directories like /dev, /proc, /mnt, 
         /sys, /boot, and /var.
@@ -230,7 +243,6 @@ def tprint(s:str) -> None:
     sys.stderr.flush()
 
 
-@trap
 def funiq_main(pargs:argparse.Namespace) -> int:
 
     pargs.exclude.extend(('/proc/', '/dev/', '/mnt/', '/sys/', '/boot/', '/var/'))
@@ -395,7 +407,7 @@ def funiq_main(pargs:argparse.Namespace) -> int:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(prog='redeux',
+    parser = argparse.ArgumentParser(prog='funiq',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=textwrap.dedent(funiq_help),
         description='funiq: Find probable duplicate files.')
@@ -404,7 +416,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--batch', action='store_true', help='no user prompts.')
 
-    parser.add_argument('--defcon', type=int, choices=(5, 4, 3, 2, 1),
+    parser.add_argument('--defcon', type=int, choices=range(1,6),
         default=5, help="The defcon level. For more info, use help.")
 
     parser.add_argument('--dir', type=str, 
@@ -419,7 +431,7 @@ if __name__ == "__main__":
         help="follow symbolic links -- the default is not to.")
 
     parser.add_argument('-f', '--format', type=str, default='csv',
-        choices=('csv', 'pandas', 'pickle', 'stata', 'feather', 'json', 'excel'),
+        choices=converters.keys(),
         help="Format for the report on activities.")
 
     parser.add_argument('--include-hidden', action='store_true',
