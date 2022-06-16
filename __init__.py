@@ -1,3 +1,3 @@
 __all__ = [
-    help, score, undeux
+    fname, funiq
     ]
