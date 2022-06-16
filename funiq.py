@@ -59,6 +59,32 @@ by_hash     = collections.defaultdict(list)
 
 hardlinks   = collections.defaultdict(list)
 
+
+byte_symbols = tuple(list('YZEPTGMB'))
+byte_values = tuple((2<<10)**i for i in range(8,0,-1))
+byte_sizes = dict(zip(byte_symbols, byte_values))
+
+
+def byte_scale(i:int, key:str='X') -> str:
+    """
+    i -- an integer to scale.
+    key -- a character to use for scaling.
+    """
+    try:
+        divisor = byte_scaling[key]
+    except:
+        return ""
+
+    try:
+        return f"{round(i/divisor, 3)}{key}"
+    except:
+        for k, v in byte_scaling.items():
+            if i > v: return f"{round(i/v, 3)}{k}"
+        else:
+            # How did this happen?
+            return f"Error: byte_scale({i}, {k})"
+
+
 converters = {
     'stata':('to_stata', 'dta'),
     'excel':('to_excel','xls'),
@@ -168,6 +194,71 @@ def all_files_in(s:str, include_hidden:bool=False) -> str:
             s = os.path.join(c, f)
             if not include_hidden and '/.' in s: continue
             yield s
+
+
+byte_remap = {
+    'YB':'Y',
+    'ZB':'Z',
+    'EB':'E',
+    'PB':'P',
+    'TB':'T',
+    'GB':'G',
+    'MB':'M',
+    'KB':'K'
+    }
+
+
+byte_scaling = {
+    'Y':1024**8,
+    'Z':1024**7,
+    'E':1024**6,
+    'P':1024**5,
+    'T':1024**4,
+    'G':1024**3,
+    'M':1024**2,
+    'K':1024**1,
+    'B':1024**0,
+    'X':None
+    }
+
+
+def byte_scale(i:int, key:str='X') -> str:
+    """
+    i -- an integer to scale.
+    key -- a character to use for scaling.
+    """
+    try:
+        if (divisor := byte_scaling[key]) == 1: return i
+    except:
+        return ""
+
+    try:
+        return f"{round(i/divisor, 3)}{key}"
+    except:
+        for k, v in byte_scaling.items():
+            if i > v: return f"{round(i/v, 3)}{k}"
+        else:
+            # How did this happen?
+            return f"Error: byte_scale({i}, {k})"
+
+
+def byte_size(s:str) -> int:
+    """
+    Takes a string like '20K' and changes it to 20*1024.
+    Note that it accepts '20k' or '20K'
+    """ 
+    if not s: return 0
+
+    # Take care of the case where it is KB rather than K, etc.
+    if s[-2:] in byte_remap:
+        s = s[:-2] + byte_remap[s[-2:]]
+
+    try:
+        multiplier = byte_scaling[s[-1].upper()]
+        the_rest = int(s[:-1])
+        return the_rest*multiplier
+    except:
+        return 0
 
 
 def dump_cmdline(args:argparse.ArgumentParser, return_it:bool=False, split_it:bool=False) -> str:
@@ -338,7 +429,14 @@ def funiq_main(pargs:argparse.Namespace) -> int:
     # The for-loop will be empty if there are no hogs, so no need to
     # purposefully ignore this statement.
     true_duplicates = dict(sorted(true_duplicates.items(), reverse=True))
-    row_generator = ((hogsize, f, datetime.date.fromtimestamp(int(f.DoB))) 
+
+    # Note: the str(f) is for clarity. When passing the Fname object to
+    # pandas, pandas cannot makes sense of it, and its default
+    # behavior is to invoke the object's str representation, which
+    # Python guarantees us is available. 
+    row_generator = ((byte_scale(hogsize, pargs.units), 
+            str(f), 
+            datetime.date.fromtimestamp(int(f.DoB))) 
         for hogsize, files in true_duplicates.items() 
             for f in files)
 
@@ -405,8 +503,8 @@ if __name__ == "__main__":
         help=f"files less than this size (default {resource.getpagesize()+1}) are not evaluated.")
 
     parser.add_argument('--units', type=str, 
-        default="X", 
-        choices=('B', 'G', 'K', 'M', 'X'),
+        default="B", 
+        choices=byte_sizes.keys(),
         help="""file sizes are in bytes by default. Report them in 
 K, M, G, or X (auto scale), instead""")
 
