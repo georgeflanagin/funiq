@@ -5,17 +5,34 @@ funiq
 
 1. General
 2. Options
-3. Methods
+3. Typical uses
 
 
 # General
 
+`funiq` is a program to look for files on large file systems that
+are *probably* duplicates. 
+
+1.  `funiq` first extracts all the possible
+    information from the directory, and does not read the files.
+    It builds two tables, one with the file size as a key, and
+    the other with the inode as the key.
+1.  The files with unique sizes are eliminated from further
+    consideration. Files with the same inode are clearly the
+    same file, and they are also dismissed from further consideration.
+1.  The normal mode is `defcon == 5`, in which case the first
+    disc page of files with the same length are hashed to see if
+    they are different. In `defcon == 4`, the first 64 pages are
+    hashed. A table is built that is keyed on hash, and files
+    with unique hashes are eliminated. More robust (and time
+    consuming) methods are used at `defcon < 4`.
+
 Unless you are running --quiet, the program will display
-    a period for every 1000 files that are "stat-ed" when the
-    directory is being browsed.
+a period for every 1000 files that are "stat-ed" when the
+directory is being browsed.
 
 Hashing is shown with a # for every 1000 files that are
-    hashed.
+hashed.
 
 # Options
 
@@ -46,7 +63,7 @@ Hashing is shown with a # for every 1000 files that are
     directories like /dev, /proc, /mnt, /sys, /boot, and /var are
     ignored by default.
 
-`--fmt`, `--format` :: One of csv, pickle, pandas, feather, or stata.
+`--fmt`, `--format` :: One of `csv`, `pickle`, `pandas`, `feather`, or `stata`.
     The default is csv in the form of a fact table. The file will
     be given an extension with the same name unless an extension
     is given in the --output directive.
@@ -58,7 +75,7 @@ Hashing is shown with a # for every 1000 files that are
 
 `--include-hidden` :: This switch is generally off, and hidden files
     will be excluded. They are often part of a git repo, or a part
-    of some program's cache. Why bother?
+    of some program's cache. IOW, why bother?
 
 `--limit` :: if set, the program will stop scanning after this many files
     are stat-ed. This switch facilitates testing.
@@ -77,7 +94,9 @@ Hashing is shown with a # for every 1000 files that are
     to even figure into our calculus.
 
 `--units` :: By default, file sizes are reported in the bytes (B). However,
-    G, M, K and X are availble, where X is autoscale.
+    `G`, `M`, and `K` are available, and with an eye toward the future, so
+    are `T`, `P`, `E`, `Z`, and `Y`. Who knows, someday they might be
+    needed.
 
 `--verbose` :: Provides more information as the program runs. This
     switch is superseded by --quiet.
@@ -91,6 +110,12 @@ Hashing is shown with a # for every 1000 files that are
     than the time it has been running. The files are in use, and
     if they are duplicates, then there is probably a reason.
 
-# Method
+# Typical uses
 
+`funiq` is well suited for the daily report of disc hogs. It can be
+run on the `cron`, or in cluster computing situations, a `SLURM` job
+is well suited. A typical execution might be like this:
 
+```bash
+python funiq.py --batch --dir /scratch -x .fchk -o hogreport.csv
+```
