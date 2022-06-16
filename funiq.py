@@ -443,7 +443,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--units', type=str, 
         default="B", 
-        choices=byte_sizes.keys(),
+        choices=byte_symbols,
         help="""file sizes are in bytes by default. Report them in 
 K, M, G, or X (auto scale), instead""")
 
