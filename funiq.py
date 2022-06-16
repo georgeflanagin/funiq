@@ -215,6 +215,7 @@ def funiq_main(pargs:argparse.Namespace) -> int:
     tprint(f"Stating directory entries in {pargs.dir}. Each dot represents 1000 files.\n")
     small_files = 0
     young_files = 0
+    excluded_files = 0
     youngest_file = time.time() - pargs.young_file*86400
     try:
         for i, f in enumerate(all_files_in(pargs.dir, pargs.include_hidden), start=1):
@@ -228,7 +229,9 @@ def funiq_main(pargs:argparse.Namespace) -> int:
             # 2. Is it a symlink that we are not following?
             # 3. Is it qualified after stat-ing it?
             ######################################################
-            if pargs.exclude and any(_ in f for _ in pargs.exclude): continue 
+            if pargs.exclude and any(_ in f for _ in pargs.exclude): 
+                excluded_files += 1
+                continue 
             if not pargs.follow_links and os.path.islink(f): continue
 
             f = fname.Fname(f)
@@ -245,7 +248,6 @@ def funiq_main(pargs:argparse.Namespace) -> int:
             else:
                 by_size[len(f)].append(f)
             
-            
         sys.stderr.write('\n')
         sys.stderr.flush()
         tprint(f"All {i} files have been stat-ed")
@@ -254,8 +256,9 @@ def funiq_main(pargs:argparse.Namespace) -> int:
         pass
 
 
-    tprint(f"{small_files} not considered due to small size.")
-    tprint(f"{young_files} not considered due to recent activity.")
+    tprint(f"{excluded_files} files not considered due to explicit exclusion.")
+    tprint(f"{small_files} files not considered due to small size.")
+    tprint(f"{young_files} files not considered due to recent activity.")
     tprint(f"There were {len(by_inode)} pseudo-duplicates found.")
     tprint(f"Filtering {len(by_size)} file sizes.")
 
@@ -329,7 +332,7 @@ def funiq_main(pargs:argparse.Namespace) -> int:
 
     num_dups = sum(len(v) for v in true_duplicates.values())
     hogs = sorted(true_duplicates.keys(), reverse=True)
-    print("\n")
+    sys.stderr.write("\n")
     tprint(f"Eliminated {edge_detections} files with edge hashing.")
     tprint(f"Found {num_dups} (probable) duplicated files representing {len(hogs)} unique files.")    
 
